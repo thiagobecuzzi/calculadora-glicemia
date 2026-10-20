@@ -1,7 +1,6 @@
 from datetime import datetime, timedelta, timezone
 import json
 import os
-import pandas as pd
 import streamlit as st
 
 st.set_page_config(
@@ -9,7 +8,6 @@ st.set_page_config(
 )
 
 CONFIG_FILE = "config_glicemia.json"
-HISTORICO_FILE = "historico_glicemia.csv"
 
 DEFAULT_CONFIG = {
     "glicemia_alvo": 100.0,
@@ -101,28 +99,6 @@ if submitted:
       unsafe_allow_html=True,
   )
 
-  id_registro = agora_local.strftime("%Y%m%d%H%M%S")
-
-  registro = {
-      "ID": id_registro,
-      "Data/Hora": agora_local.strftime("%d/%m/%Y %H:%M"),
-      "Faixa": horario_selecionado,
-      "Glicemia": glicemia_atual,
-      "Carbo (g)": carboidratos,
-      "IC": ic_aplicado,
-      "Dose (UI)": round(dose_total, 2),
-  }
-
-  df_novo = pd.DataFrame([registro])
-  try:
-    df_hist = pd.read_csv(HISTORICO_FILE)
-    df_hist = pd.concat([df_hist, df_novo], ignore_index=True)
-  except FileNotFoundError:
-    df_hist = df_novo
-
-  df_hist.to_csv(HISTORICO_FILE, index=False)
-  st.toast("Medição salva com sucesso!", icon="✅")
-
 # --- CONFIGURAÇÕES ---
 with st.expander("⚙️ Ajustes e Alvos (Alvo, FS e IC por Hora)"):
   novo_alvo = st.number_input(
@@ -153,62 +129,3 @@ with st.expander("⚙️ Ajustes e Alvos (Alvo, FS e IC por Hora)"):
     salvar_config(config)
     st.success("Configurações atualizadas!")
     st.rerun()
-
-# --- HISTÓRICO E EXCLUSÃO DE REGISTROS ---
-if os.path.exists(HISTORICO_FILE):
-  try:
-    df_historico = pd.read_csv(HISTORICO_FILE)
-
-    if not df_historico.empty:
-      st.divider()
-      st.subheader("📊 Histórico de Medições")
-
-      if (
-          "Glicemia Atual" in df_historico.columns
-          and "Glicemia" not in df_historico.columns
-      ):
-        df_historico = df_historico.rename(columns={"Glicemia Atual": "Glicemia"})
-      if (
-          "Dose Sugerida (UI)" in df_historico.columns
-          and "Dose (UI)" not in df_historico.columns
-      ):
-        df_historico = df_historico.rename(
-            columns={"Dose Sugerida (UI)": "Dose (UI)"}
-        )
-
-      cols_exibir = [c for c in df_historico.columns if c != "ID"]
-      st.dataframe(df_historico[cols_exibir].tail(10), use_container_width=True)
-
-      with st.expander("🗑️ Excluir ou Limpar Histórico"):
-        opcoes_apagar = {}
-        for idx, row in df_historico.iterrows():
-          d_hora = row.get("Data/Hora", "Data desconhecida")
-          glic = row.get("Glicemia", "?")
-          dose = row.get("Dose (UI)", "?")
-          label = f"{d_hora} | Glicemia: {glic} mg/dL | {dose} UI"
-          opcoes_apagar[label] = idx
-
-        item_selecionado = st.selectbox(
-            "Selecione o registro para apagar:",
-            options=list(opcoes_apagar.keys()),
-        )
-
-        col_del1, col_del2 = st.columns(2)
-
-        with col_del1:
-          if st.button("❌ Apagar Registro", use_container_width=True):
-            index_para_remover = opcoes_apagar[item_selecionado]
-            df_historico = df_historico.drop(index_para_remover)
-            df_historico.to_csv(HISTORICO_FILE, index=False)
-            st.toast("Registro apagado com sucesso!", icon="🗑️")
-            st.rerun()
-
-        with col_del2:
-          if st.button("⚠️ Apagar TUDO", use_container_width=True):
-            df_vazio = pd.DataFrame(columns=df_historico.columns)
-            df_vazio.to_csv(HISTORICO_FILE, index=False)
-            st.toast("Histórico limpo completamente!", icon="🧹")
-            st.rerun()
-  except Exception:
-    if os.path.exists(HISTORICO_FILE):
-      os.remove(HISTORICO_FILE)
