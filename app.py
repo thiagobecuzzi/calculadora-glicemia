@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 import json
 import os
 import pandas as pd
@@ -40,10 +40,13 @@ config = st.session_state["config"]
 
 st.title("🩸 Calculadora Rápida")
 
-# --- REGISTRO PRINCIPAL ---
-hora_atual_int = datetime.now().hour
+# --- AJUSTE DE FUSO HORÁRIO (Horário do Brasil / Brasília) ---
+fuso_brasil = timezone(timedelta(hours=-3))
+agora_local = datetime.now(fuso_brasil)
+hora_atual_int = agora_local.hour
 faixa_atual = f"{hora_atual_int:02d}h - {hora_atual_int+1:02d}h"
 
+# --- REGISTRO PRINCIPAL ---
 with st.form("form_celular"):
   st.markdown("### 📝 Nova Medição")
 
@@ -86,19 +89,23 @@ if submitted:
   dose_refeicao = carboidratos / ic_aplicado if ic_aplicado > 0 else 0.0
   dose_total = max(0.0, dose_correcao + dose_refeicao)
 
-  st.success("### Resultado")
-  st.metric(
-      label="Dose Total Sugerida",
-      value=f"{dose_total:.2f} UI",
-      delta=f"Correção: {dose_correcao:.2f} | Refeição: {dose_refeicao:.2f}",
-      delta_color="off",
+  # --- CAMPO EM DESTAQUE COM A DOSE CORRETA ---
+  st.markdown(
+      f"""
+        <div style="background-color:#d4edda; padding:15px; border-radius:10px; border: 1px solid #c3e6cb; text-align:center; margin-bottom: 15px;">
+            <h4 style="color:#155724; margin:0 0 5px 0;">💉 Tome exatamente:</h4>
+            <h1 style="color:#155724; font-size:42px; margin:0;">{dose_total:.2f} UI</h1>
+            <p style="color:#155724; margin:5px 0 0 0; font-size:14px;">Correção: {dose_correcao:.2f} UI | Refeição: {dose_refeicao:.2f} UI</p>
+        </div>
+        """,
+      unsafe_allow_html=True,
   )
 
-  id_registro = datetime.now().strftime("%Y%m%d%H%M%S")
+  id_registro = agora_local.strftime("%Y%m%d%H%M%S")
 
   registro = {
       "ID": id_registro,
-      "Data/Hora": datetime.now().strftime("%d/%m/%Y %H:%M"),
+      "Data/Hora": agora_local.strftime("%d/%m/%Y %H:%M"),
       "Faixa": horario_selecionado,
       "Glicemia": glicemia_atual,
       "Carbo (g)": carboidratos,
@@ -115,7 +122,6 @@ if submitted:
 
   df_hist.to_csv(HISTORICO_FILE, index=False)
   st.toast("Medição salva com sucesso!", icon="✅")
-  st.rerun()
 
 # --- CONFIGURAÇÕES ---
 with st.expander("⚙️ Ajustes e Alvos (Alvo, FS e IC por Hora)"):
@@ -148,7 +154,7 @@ with st.expander("⚙️ Ajustes e Alvos (Alvo, FS e IC por Hora)"):
     st.success("Configurações atualizadas!")
     st.rerun()
 
-# --- HISTÓRICO E EXCLUSÃO DE REGISTROS (COM PROTEÇÃO) ---
+# --- HISTÓRICO E EXCLUSÃO DE REGISTROS ---
 if os.path.exists(HISTORICO_FILE):
   try:
     df_historico = pd.read_csv(HISTORICO_FILE)
@@ -157,7 +163,6 @@ if os.path.exists(HISTORICO_FILE):
       st.divider()
       st.subheader("📊 Histórico de Medições")
 
-      # Padroniza colunas caso o arquivo seja antigo
       if (
           "Glicemia Atual" in df_historico.columns
           and "Glicemia" not in df_historico.columns
@@ -174,16 +179,12 @@ if os.path.exists(HISTORICO_FILE):
       cols_exibir = [c for c in df_historico.columns if c != "ID"]
       st.dataframe(df_historico[cols_exibir].tail(10), use_container_width=True)
 
-      with st.expander("🗑️ Excluir Registros do Histórico"):
+      with st.expander("🗑️ Excluir ou Limpar Histórico"):
         opcoes_apagar = {}
         for idx, row in df_historico.iterrows():
-          # Leitura segura com fallback caso alguma coluna varie
           d_hora = row.get("Data/Hora", "Data desconhecida")
-          glic = row.get(
-              "Glicemia", row.get("Glicemia Atual", "?")
-          )
-          dose = row.get("Dose (UI)", row.get("Dose Sugerida (UI)", "?"))
-
+          glic = row.get("Glicemia", "?")
+          dose = row.get("Dose (UI)", "?")
           label = f"{d_hora} | Glicemia: {glic} mg/dL | {dose} UI"
           opcoes_apagar[label] = idx
 
@@ -208,11 +209,6 @@ if os.path.exists(HISTORICO_FILE):
             df_vazio.to_csv(HISTORICO_FILE, index=False)
             st.toast("Histórico limpo completamente!", icon="🧹")
             st.rerun()
-  except Exception as e:
-    # Se houver qualquer incompatibilidade grave no arquivo CSV antigo, limpa para evitar novos erros
-    st.warning(
-        "Detectamos um formato antigo no histórico. Criando um novo arquivo limpo"
-        " para evitar erros."
-    )
+  except Exception:
     if os.path.exists(HISTORICO_FILE):
       os.remove(HISTORICO_FILE)
